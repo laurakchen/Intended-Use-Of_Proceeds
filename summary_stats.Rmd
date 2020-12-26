@@ -1,0 +1,115 @@
+---
+title: "Data/Methods Update"
+author: "Laura Chen"
+date: "10/23/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# Dataset
+
+The IPO dataset I have consolidated thus far contains information for 2515 IPO companies in the United States between 1997-2019. Although more variables are still in the process of retrieval, there are currently 58 variables. Some of the main characteristics of each IPO company include its Filing Date, Issue Date, Company Name, main SIC code, ticker symbol, offer price, shares offered, stock price at close of offer, and 9-digit CUSIP number. These variables came from SDC Platinum, which offers a variety of financial databases. Information about stock prices were retrieved from CRSP's WRDS database and the "use of proceeds" documents were obtained from SEC's EDGAR. Sentiment information was computed based upon Tim Loughran and Bill McDonald's sentiment word lists. 
+
+We are interested in investigating how the sentiment of an IPO company's "use of proceeds" document along with the categorization of company intentions is associated with its IPO underpricing. Below, we list summary statistics of our key variables of interest.
+
+
+# Summary Statistics
+
+## Category Proportions
+
+We calculated the proportion of words related to 4 categories of company intentions within each IPO company's "use of proceeds" text using the word length of each text document. Note that c1=Acquisitions, c2=Financing Transactions, c3=Growth Investment, and c4=Production Investment.
+
+```{r}
+# import libraries
+library(pander)
+library(readxl)
+df = read_xlsx("IPO_Fee/Consolidated_IPO_v1.xlsx")
+df = df[which(!duplicated(df)),] # remove dupes
+df$`Issue Date` = as.Date(df$`Issue Date`, tryFormats = c("%m/%d/%y"))
+df$year = as.numeric(format(df$`Issue Date`,'%y'))
+
+names(df)[names(df) == "Match Name"] = "match_name"
+names(df)[names(df) == "Match Date"] = "match_date"
+df = subset(df, select=-c(match_name, match_date))
+names(df)[names(df) == "Word Length_sentiment"] = "word_length"
+categories = subset(df, select = c(word_length,c1, c2,c3,c4))
+
+pander(summary(categories))
+
+hist(df$c1, xlab="Acquisitions", main="Distribution of Acquisitions")
+hist(df$c2, xlab="Financing Transactions", main="Distribution of Financing Transactions")
+hist(df$c3, xlab="Growth Investment", main="Distribution of Growth Investment")
+hist(df$c4, xlab="Production Investment", main="Distribution of Production Investment")
+par(mfrow=c(1,1))
+df$underpricing_pct = df$underpricing*100
+hist(df$underpricing_pct, xlab="Underpricing (%)", main="Distribution of Underpricing", col="lightblue")
+
+```
+
+```{r}
+pander(head(df))
+```
+
+
+## Sentiment Proportions
+
+We calculated the proportion of sentiment within each IPO company's "use of proceeds" text using Tim Loughran and Bill McDonald's 7 sentiment word lists, which classifies a financial word into one of 7 categories: negative, positive, uncertainty, strong modal, weak modal, litigious, and constraining. It appears that there is a higher proportion of uncertainty in the "use of proceeds" text of IPO companies' filings.
+
+```{r}
+library(ggplot2)
+sentiment_categories = subset(df, select=c(negative, positive,
+                                           uncertainty, litigious, strongmodal, weakmodal, constraining))
+pander(summary(sentiment_categories))
+
+par(mfrow=c(2,2))
+hist(df$negative, xlab="Negative", main="Distribution of Negative")
+hist(df$positive, xlab="Positive", main="Distribution of Positive")
+hist(df$uncertainty, xlab="Uncertainty", main="Distribution of Uncertainty")
+hist(df$litigious, xlab="Litigious", main="Distribution of Litigious")
+hist(df$strongmodal, xlab="Strong Modal", main="Distribution of Strong Modal")
+hist(df$weakmodal, xlab="Weak Modal", main="Distribution of Weak Modal")
+hist(df$constraining, xlab= "Constraining", main="Distribution of Constraining")
+
+df$internet = as.factor(df$internet)
+ggplot(df, aes(x=internet)) + 
+  geom_bar(fill="lightblue") +
+  labs(title="Distribution of Internet IPO Companies",
+       x="", y="Number of Companies")
+```
+
+## Underpricing
+
+Here, we define IPO underpricing as the increase in stock value from the initial offering price to the first-day closing price. Thus, our response variable is underpricing. Below, prc= first-day closing price.
+
+```{r}
+names(df)[names(df) == "Offer Price"] = "offer_price" 
+underprice_categories = subset(df, select=c(underpricing, prc, offer_price))
+pander(summary(underprice_categories))
+```
+
+## Other variables
+
+Below is a list of all the variables in the IPO dataset thus far.
+
+```{r}
+list(colnames(df))
+```
+
+
+```{r}
+par(mar = c(6.1, 4.1, 4.1, 4.1) # change the margins
+    )
+boxplot(sentiment_categories, xaxt = "n", ylab="Proportion",
+        main="Distribution of Sentiment Category Proportion in Use of Proceeds")
+axis(1, labels = FALSE)    # add tick marks
+text(x=seq_along(names(sentiment_categories)), y=par("usr")[3]-0.02, 
+     labels = names(sentiment_categories), srt = 35, adj = 1, xpd = NA)
+mtext("Sentiment Category", side = 1, padj = 7)    # add axis label
+
+```
+

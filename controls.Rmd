@@ -1,0 +1,61 @@
+---
+title: "Controls"
+author: "Laura Chen"
+date: "11/5/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## add in VIX and NASDAQ Composite controls to df
+
+```{r}
+library(readxl)
+df = read_xlsx("IPO_Fee/Consolidated_IPO_v1.xlsx")
+df$`Filing Date` = as.Date(df$`Filing Date`, tryFormats = c("%m/%d/%y"))
+df$`Issue Date` = as.Date(df$`Issue Date`, tryFormats = c("%m/%d/%y"))
+
+# read in VIX and NASDAQ 
+vix.df = read.csv("VIXCLS.csv")
+nasdaq.df = read.csv("NASDAQCOM.csv")
+vix.df$DATE = as.Date(vix.df$DATE, tryFormats = c("%Y-%m-%d"))
+nasdaq.df$DATE = as.Date(nasdaq.df$DATE, tryFormats = c("%m/%d/%y"))
+nasdaq.df$NASDAQCOM = as.numeric(as.character(nasdaq.df$NASDAQCOM))
+vix.df$VIXCLS = as.numeric(as.character(vix.df$VIXCLS))
+
+
+# get column of returns for nasdaq composite and VIX
+nasdaq.vec = rep(0, nrow(df)) # initialize vectors
+vix.vec = rep(0, nrow(df))
+
+# returns for nasdaq composite
+for (i in 1:nrow(df)) {
+  date = df$`Issue Date`[[i]]
+  date.ind = which(nasdaq.df$DATE == date)
+  prevdate.ind = date.ind-5
+  if (is.na(nasdaq.df$NASDAQCOM[[date.ind-5]])) {
+      nasdaq.vec[[i]] = (nasdaq.df$NASDAQCOM[[date.ind]]-nasdaq.df$NASDAQCOM[[prevdate.ind-1]])/nasdaq.df$NASDAQCOM[[prevdate.ind-1]]
+  } else {
+    nasdaq.vec[[i]] = (nasdaq.df$NASDAQCOM[[date.ind]]-nasdaq.df$NASDAQCOM[[prevdate.ind]])/nasdaq.df$NASDAQCOM[[prevdate.ind]]
+  }
+}
+
+# returns for VIX
+for (i in 1:nrow(df)) {
+  date = df$`Issue Date`[[i]]
+  date.ind = which(vix.df$DATE == date)
+  prevdate.ind = date.ind-5
+  if (is.na(vix.df$VIXCLS[[date.ind-5]])) {
+      vix.vec[[i]] = (vix.df$VIXCLS[[date.ind]]-vix.df$VIXCLS[[prevdate.ind-1]])/vix.df$VIXCLS[[prevdate.ind-1]]
+  } else {
+    vix.vec[[i]] = (vix.df$VIXCLS[[date.ind]]-vix.df$VIXCLS[[prevdate.ind]])/vix.df$VIXCLS[[prevdate.ind]]
+  }
+}
+
+# add columns to original df
+df$nasdaq_returns = nasdaq.vec
+df$vix_returns = vix.vec
+```
+
