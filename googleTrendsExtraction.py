@@ -28,9 +28,9 @@ groupkeywords = [list(x) for x in groupkeywords]
 searchAvail = [0]*searchLen # dummy var column for whether gtrend search volume is available
 searchAvgLst = [None]*searchLen # search volume average norm for ipo's
 
-i = 2139
+i = 0
 fails = 0
-for ipo in groupkeywords[i:]:
+for ipo in groupkeywords:
 	try:
 		issueDate = str(dateList[i])[:10]
 		if int(issueDate[:4]) < 2004: # gtrend data not available
