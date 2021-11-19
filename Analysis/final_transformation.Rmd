@@ -1,0 +1,129 @@
+---
+title: "Box-cox transformation"
+author: "Laura Chen"
+date: "3/19/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# load data
+library(readxl)
+library(knitr)
+library(broom)
+library(gtsummary)
+library(pastecs)
+df = read_xlsx("~/desktop/FinProject/Analysis/IPO_data.xlsx")
+df = subset(df, select=-c(search_avail, search_vol_avg, 
+                    original_high_filing_price,original_low_filing_price,
+                    upward_adjustment, offer_price, closing_price))
+df = df[!duplicated(df), ] # drop duplicates
+
+```
+
+```{r}
+# use min-max scaling to normalize data
+library(caret)
+df_numeric = df[sapply(df,is.numeric)]
+preproc2 <- preProcess(df_numeric, method=c("range"))
+ 
+norm2 <- predict(preproc2, df_numeric)
+norm2 = norm2[!(norm2$underpricing == 0),] # get rid of zero value in underpricing
+```
+
+```{r}
+# OLS no transformation
+model = lm(underpricing~., data=norm2)
+
+# OLS with log(x+1) transformation on underpricing // use in paper
+df_trans = norm2
+df_trans$underpricing = log1p(df_trans$underpricing)
+model_trans = lm(underpricing~., data=df_trans)
+summary(model_trans)
+kable(tidy(summary(model_trans)))
+#QQ plot
+qqnorm(model_trans$residuals)
+qqline(model_trans$residuals)
+
+plot(residuals(model_trans)~fitted(model_trans))
+
+kable(tidy(summary(df_trans, digits=4)))
+```
+
+
+```{r}
+# boxcox transformation
+# (source: https://www.statology.org/box-cox-transformation-in-r/)
+library(MASS)
+library(mgcv)
+bc = boxcox(underpricing~., data=df_trans)
+lambda <- bc$x[which.max(bc$y)]
+new_model <- lm(((underpricing^lambda-1)/lambda) ~., data=df_trans)
+summary(new_model)
+plot(residuals(new_model)~fitted(new_model))
+
+#Q-Q plot for Box-Cox transformed model
+qqnorm(new_model$residuals)
+qqline(new_model$residuals)
+hist(new_model$residuals)
+
+# gam model using bocox transformation and log-transformed underpricing
+# FINAL MODEL
+bc_gam = gam(formula=((underpricing^lambda-1)/lambda)~venture_backed+
+               s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns),
+             data=df_trans)
+summary(bc_gam)
+plot(residuals(bc_gam)~fitted(bc_gam))
+
+qqnorm(residuals(bc_gam))
+qqline(residuals(bc_gam))
+hist(bc_gam$residuals)
+plot(bc_gam)
+```
+
+
+```{r}
+new = df_trans
+new$proceeds_amt_mil = log1p(new$proceeds_amt_mil)
+new$primary_shares_offered = log1p(new$primary_shares_offered)
+new$secondary_shares_offered = log1p(new$secondary_shares_offered)
+new$c3 = log1p(new$c3)
+new$c4 = log1p(new$c4)
+new$uncertainty = log1p(new$uncertainty)
+new$litigious = log1p(new$litigious)
+new$strongmodal = log1p(new$strongmodal)
+new$weakmodal = log1p(new$weakmodal)
+new$constraining = log1p(new$constraining)
+
+# boxcox transformation on log transformed response variable and log transformed 
+# predictor variables
+bc_new = boxcox(underpricing~., data=new)
+lambda_new <- bc_new$x[which.max(bc_new$y)]
+new_model_new <- lm(((underpricing^lambda_new-1)/lambda_new) ~., data=new)
+summary(new_model_new)
+plot(residuals(new_model_new)~fitted(new_model_new))
+qqnorm(residuals(new_model_new))
+qqline(residuals(new_model_new))
+hist(residuals(new_model_new))
+
+
+bc_gam_1 = gam(formula=((underpricing^lambda_new-1)/lambda_new)~venture_backed+
+               s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns),
+             data=new)
+summary(bc_gam_1)
+plot(residuals(bc_gam_1)~fitted(bc_gam_1))
+qqnorm(residuals(bc_gam_1))
+qqline(residuals(bc_gam_1))
+```
+

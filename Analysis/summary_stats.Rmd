@@ -1,0 +1,196 @@
+---
+title: "summary_stats"
+author: "Laura Chen"
+date: "4/4/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r}
+# load data
+library(readxl)
+library(knitr)
+library(broom)
+library(gtsummary)
+library(tidyverse)
+library(pastecs)
+library(pander)
+library(kableExtra)
+df = read_xlsx("~/desktop/FinProject/Analysis/IPO_data.xlsx")
+df = subset(df, select=-c(search_avail, search_vol_avg, 
+                    original_high_filing_price,original_low_filing_price,
+                    upward_adjustment, offer_price, closing_price))
+df = df[!duplicated(df), ] # drop duplicates
+df = df[!is.na(df$vix_returns),]
+df = df %>% 
+  rename(
+    acquisitions = c1,
+    financing_transactions = c2,
+    growth_invest = c3,
+    production_invest = c4,
+    num_lead_managers = num_lead_colead_managers,
+    primary_shares_offered_mil = primary_shares_offered,
+    secondary_shares_offered_mil = secondary_shares_offered
+    )
+
+# change shares to be in terms of millions
+df$secondary_shares_offered_mil = df$secondary_shares_offered_mil/1000000
+df$primary_shares_offered_mil = df$primary_shares_offered_mil/1000000
+# categories should be in proportion
+df$acquisitions = df$acquisitions/100
+df$financing_transactions = df$financing_transactions/100
+df$growth_invest = df$growth_invest/100
+df$production_invest = df$production_invest/100
+
+# use min-max scaling to normalize data
+library(caret)
+df_numeric = df[sapply(df,is.numeric)]
+preproc2 <- preProcess(df_numeric, method=c("range"))
+ 
+norm2 <- predict(preproc2, df_numeric)
+norm2 = norm2[!(norm2$underpricing == 0),] # get rid of zero value in underpricing
+
+# log-transformed response variable
+df_trans = norm2
+df_trans$underpricing = log1p(df_trans$underpricing)
+```
+
+```{r}
+
+#dec.vec = c()
+#kable(t(apply(df_numeric,2, function(x) summary(x))), digits=4, 
+  #    caption="Summary statistics of all variables in dataset", label=1)
+kable(format(round(t(apply(df_numeric, 2, function(x) summary(x))), 3), 
+       scientific = FALSE), label=1)
+```
+
+```{r, fig.cap="Histogram distribution of underpricing for the sample of 2455 IPO companies taken between 1997 and 2019"}
+#hist(df_numeric$underpricing, xlab="Underpricing", main="")
+```
+
+
+
+```{r}
+# OLS with log(x+1) transformation on underpricing // use in paper
+model_trans = lm(underpricing~., data=df_trans)
+#summary(model_trans, digits=3)
+
+model_trans_tbl = kable(summary(model_trans)$coef, digits=4)
+row_spec(model_trans_tbl, c(1:5, 11, 13:17, 21:23), bold = TRUE)
+
+par(mfrow=c(1,2))
+plot(residuals(model_trans)~fitted(model_trans), main="Residuals Vs Fitted Values",
+     xlab="Fitted Values", ylab="Residuals", pch=".")
+abline(h=0, col="red")
+#QQ plot
+qqnorm(model_trans$residuals)
+qqline(model_trans$residuals)
+
+```
+
+```{r}
+library(visreg)
+par(mfrow=c(2,3))
+visreg(model_trans, "growth_invest", 
+       main="Growth Investment", xlab="Growth Investment",
+       ylab="Log(underpricing+1)"
+       ) 
+visreg(model_trans, "positive", main="Positive", xlab="Positive", 
+       ylab="Log(underpricing+1)")
+visreg(model_trans, "uncertainty", main="Uncertainty", xlab="Uncertainty", 
+       ylab="Log(underpricing+1)")
+visreg(model_trans, "negative", main="Negative", xlab="Negative", 
+       ylab="Log(underpricing+1)")
+visreg(model_trans, "litigious", main="Litigious", xlab="Litigious", 
+       ylab="Log(underpricing+1)")
+```
+
+
+```{r}
+metrics.tbl = data.frame(
+  Metrics = c("Mean Absolute Error", "Mean Squared Error", "Root Mean Squared Error"),
+  Value = c(0.04816, 0.0075, 0.0868)
+)
+#kable(metrics.tbl, booktabs=TRUE)
+
+feat.tbl = data.frame(
+  Feature = c("proceeds_amt_mil", "internet", "nasdaq_returns", "positive",
+              "vix_returns", "primary_shares_offered_mil", "strong_modal", 
+              "word_length_sentiment", "growth_invest", "financing_transactions",
+              "production_invest", "uncertainty", "weak_modal", "acquisitions",
+              "constraining", "litigious", "venture_backed", "num_lead_managers",
+              "negative", "secondary_shares_offered_mil", "num_bookrunners",
+              "rank_no_leads"),
+  Importance = c(0.1319, 0.1262, 0.1079, 0.0674, 0.0654, 0.0569, 0.0552,
+                 0.0481, 0.0477, 0.0459, 0.0369, 0.0320, 0.0302, 0.0273, 0.0235,
+                 0.0231, 0.0227, 0.0173, 0.0167, 0.0133, 0.0022, 0.0016)
+)
+kable(feat.tbl, booktabs=TRUE)
+
+
+```
+
+```{r}
+library(MASS)
+library(mgcv)
+bc = boxcox(underpricing~., data=df_trans)
+lambda <- bc$x[which.max(bc$y)]
+#new_model <- lm(((underpricing^lambda-1)/lambda) ~., data=df_trans)
+#summary(new_model)
+#plot(residuals(new_model)~fitted(new_model))
+
+#Q-Q plot for Box-Cox transformed model
+#qqnorm(new_model$residuals)
+#qqline(new_model$residuals)
+#hist(new_model$residuals)
+
+# gam model using bocox transformation and log-transformed underpricing
+# FINAL MODEL
+bc_gam = gam(formula=((underpricing^lambda-1)/lambda)~venture_backed+
+               s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_managers)+s(acquisitions)+
+               s(financing_transactions)+s(growth_invest)+s(production_invest)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns)+
+               s(primary_shares_offered_mil)+s(secondary_shares_offered_mil),
+             data=df_trans)
+#summary(bc_gam)
+par(mfrow=c(1,2))
+plot(residuals(bc_gam)~fitted(bc_gam), main="Residuals Vs Fitted Values",
+     xlab="Fitted Values", ylab="Residuals", pch=".")
+abline(h=0, col="red")
+qqnorm(residuals(bc_gam))
+qqline(residuals(bc_gam))
+```
+
+```{r}
+par(mfrow=c(1,3))
+visreg(bc_gam, "growth_invest", main="Growth Investment", 
+       xlab="Log(Growth Investment+1)", ylab="(log(underpricing+1)^lambda-1)/lambda",
+       xtrans=log1p)
+visreg(bc_gam, "positive", main="Positive", 
+       xlab="Log(Positive+1)", ylab="(log(underpricing+1)^lambda-1)/lambda",
+       xtrans=log1p)
+visreg(bc_gam, "uncertainty", main="Uncertainty", 
+       xlab="Log(Uncertainty+1)", ylab="(log(underpricing+1)^lambda-1)/lambda",
+       xtrans=log1p)
+```
+
+
+```{r}
+library(xtable)
+sum.mod = summary(bc_gam)
+
+p_tbl = kable(sum.mod$p.table, digits=4)
+s_tbl = kable(sum.mod$s.table, digits=4)
+row_spec(p_tbl, c(1:3), bold=TRUE)
+row_spec(s_tbl, c(2:3, 6, 8, 10:11, 16:17), bold=TRUE)
+```
+
+
+
+

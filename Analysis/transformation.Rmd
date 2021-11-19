@@ -1,0 +1,282 @@
+---
+title: "Box-cox transformation"
+author: "Laura Chen"
+date: "3/19/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# load data
+library(readxl)
+df = read_xlsx("Analysis/IPO_data.xlsx")
+#df = df[which(df$search_avail == 0),]
+df = subset(df, select=-c(search_avail, search_vol_avg, 
+                    original_high_filing_price,original_low_filing_price,
+                    upward_adjustment, offer_price, closing_price))
+df = df[!duplicated(df), ] # drop duplicates
+```
+
+```{r}
+# use min-max scaling to normalize data
+library(caret)
+df_numeric = df[sapply(df,is.numeric)]
+preproc2 <- preProcess(df_numeric, method=c("range"))
+ 
+norm2 <- predict(preproc2, df_numeric)
+norm2 = norm2[!(norm2$underpricing == 0),] # get rid of zero value in underpricing
+```
+
+```{r}
+# OLS no transformation
+model = lm(underpricing~., data=norm2)
+summary(model)
+#Q-Q plot for original model
+qqnorm(model$residuals)
+qqline(model$residuals)
+
+# OLS with log(x+1) transformation on underpricing // use in paper
+df_trans = norm2
+df_trans$underpricing = log1p(df_trans$underpricing)
+model_trans = lm(underpricing~., data=df_trans)
+summary(model_trans)
+#QQ plot
+qqnorm(model_trans$residuals)
+qqline(model_trans$residuals)
+```
+
+
+```{r}
+# boxcox transformation
+# (source: https://www.statology.org/box-cox-transformation-in-r/)
+library(MASS)
+
+bc = boxcox(underpricing~., data=df_trans)
+lambda <- bc$x[which.max(bc$y)]
+new_model <- lm(((underpricing^lambda-1)/lambda) ~., data=df_trans)
+summary(new_model)
+plot(residuals(new_model)~fitted(new_model))
+
+#Q-Q plot for Box-Cox transformed model
+qqnorm(new_model$residuals)
+qqline(new_model$residuals)
+```
+
+```{r}
+new = df_trans
+new$proceeds_amt_mil = log1p(new$proceeds_amt_mil)
+new$primary_shares_offered = log1p(new$primary_shares_offered)
+new$secondary_shares_offered = log1p(new$secondary_shares_offered)
+new$c3 = log1p(new$c3)
+new$c4 = log1p(new$c4)
+new$uncertainty = log1p(new$uncertainty)
+new$litigious = log1p(new$litigious)
+new$strongmodal = log1p(new$strongmodal)
+new$weakmodal = log1p(new$weakmodal)
+new$constraining = log1p(new$constraining)
+
+gam_mod_new = gam(formula=underpricing~
+                 venture_backed+s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns),
+               data=new)
+summary(gam_mod_new)
+plot(residuals(gam_mod_new)~fitted(gam_mod_new))
+plot(gam_mod_new, scale=0)
+gam.check(gam_mod_new)
+
+
+gam_mod_new1 = gam(formula=underpricing~
+                 venture_backed+s(num_bookrunners,k=4)+s(rank_no_leads, k=6)+
+                 s(num_lead_colead_managers, k=7)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative,k=12)+s(positive,k=5)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns),
+               data=new)
+summary(gam_mod_new1)
+plot(residuals(gam_mod_new1)~fitted(gam_mod_new1))
+gam.check(gam_mod_new1)
+
+bc_new = boxcox(underpricing~., data=new)
+lambda_new <- bc_new$x[which.max(bc$y)]
+new_model_new <- lm(((underpricing^lambda_new-1)/lambda_new) ~., data=new)
+summary(new_model_new)
+plot(residuals(new_model_new)~fitted(new_model_new))
+qqnorm(residuals(new_model_new))
+qqline(residuals(new_model_new))
+hist(residuals(new_model_new))
+```
+
+
+
+```{r}
+# try gam model
+library(mgcv)
+gam_mod1 = gam(formula=underpricing~s(proceeds_amt_mil)+
+                 s(primary_shares_offered)+s(secondary_shares_offered)+
+                 venture_backed+s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns),
+               data=df_trans)
+summary(gam_mod1)
+plot(residuals(gam_mod1)~fitted(gam_mod1))
+plot(gam_mod1)
+plot(gam_mod1, scale=0)
+
+```
+
+```{r}
+# c4 and uncertainty (significant interaction)
+gam_mod_c4_1 = gam(formula=underpricing~s(proceeds_amt_mil)+
+                 s(primary_shares_offered)+s(secondary_shares_offered)+
+                 venture_backed+s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns)+
+                 ti(c4, uncertainty), data=df_trans)
+summary(gam_mod_c4_1)
+plot(residuals(gam_mod_c4_1)~fitted(gam_mod_c4_1))
+plot(gam_mod_c4_1)
+gam.check(gam_mod_c4_1)
+gam_mod_c4_2 = gam(formula=underpricing~s(proceeds_amt_mil)+
+                 s(primary_shares_offered)+s(secondary_shares_offered)+
+                 venture_backed+s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns)+
+                 s(c4, uncertainty), data=df_trans)
+summary(gam_mod_c4_2)
+plot(residuals(gam_mod_c4_2)~fitted(gam_mod_c4_2))
+plot(gam_mod_c4_2, scale=0)
+```
+
+
+
+```{r}
+# models with interaction terms
+gam_mod2 = gam(formula=underpricing~s(proceeds_amt_mil)+
+                 s(primary_shares_offered)+s(secondary_shares_offered)+
+                 venture_backed+s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns)+
+                 ti(c2, strongmodal)+ti(c2, weakmodal)+ti(c2, word_length_sentiment),
+               data=df_trans)
+summary(gam_mod2)
+```
+
+
+```{r}
+# interaction between c1 and sentiment categories
+gam_mod_3 = gam(formula=underpricing~s(proceeds_amt_mil)+
+                 s(primary_shares_offered)+s(secondary_shares_offered)+
+                 venture_backed+s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns)+
+                 ti(c1, uncertainty)+ti(c1, weakmodal)+
+                  ti(c1, word_length_sentiment)+ti(c1, negative)+
+                  ti(c1, positive)+ti(c1, constraining)+ti(c1, litigious)+
+                  ti(c1, strongmodal),
+               data=df_trans)
+summary(gam_mod_3)
+```
+
+```{r}
+# model with less terms // worse than model with all terms included
+gam_mod_4 = gam(formula=underpricing~s(proceeds_amt_mil)+
+                 s(primary_shares_offered)+s(secondary_shares_offered)+
+                 venture_backed+s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c3)+s(c1)+s(c2)+s(c4)+
+                 s(strongmodal)+s(weakmodal)+
+                 internet+s(nasdaq_returns)+s(vix_returns),
+               data=df_trans)
+summary(gam_mod_4)
+```
+
+```{r}
+# model with interactions between c2 and sentiment
+gam_mod_c2 = gam(formula=underpricing~s(proceeds_amt_mil)+
+                 s(primary_shares_offered)+s(secondary_shares_offered)+
+                 venture_backed+s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns)+
+                 ti(c2, uncertainty)+ti(c2, weakmodal)+
+                  ti(c2, word_length_sentiment)+ti(c2, negative)+
+                  ti(c2, positive)+ti(c2, constraining)+ti(c2, litigious)+
+                  ti(c2, strongmodal),
+               data=df_trans)
+
+gam_mod_c2_1 = gam(formula=underpricing~s(proceeds_amt_mil)+
+                 s(primary_shares_offered)+s(secondary_shares_offered)+
+                 venture_backed+s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns)+
+                 ti(c2, uncertainty), data=df_trans)
+summary(gam_mod_c2_1)
+```
+
+```{r}
+# model with interactions between c4 and sentiment
+gam_mod_c4 = gam(formula=underpricing~s(proceeds_amt_mil)+
+                 s(primary_shares_offered)+s(secondary_shares_offered)+
+                 venture_backed+s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns)+
+                 ti(c4, uncertainty)+ti(c4, weakmodal)+
+                  ti(c4, word_length_sentiment)+ti(c4, negative)+
+                  ti(c4, positive)+ti(c4, constraining)+ti(c4, litigious)+
+                  ti(c4, strongmodal),
+               data=df_trans)
+summary(gam_mod_c4)
+```
+
+```{r}
+# c1 and uncertainty (insignificant)
+gam_mod_c1_1 = gam(formula=underpricing~s(proceeds_amt_mil)+
+                 s(primary_shares_offered)+s(secondary_shares_offered)+
+                 venture_backed+s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns)+
+                 ti(c1, uncertainty), data=df_trans)
+summary(gam_mod_c1_1)
+```
+
+```{r}
+#library(pander)
+#pander(summary(gam_mod_c4_1))
+```
+
+```{r}
+gam_mod_c4_3 = gam(formula=underpricing~s(proceeds_amt_mil)+
+                 s(primary_shares_offered)+s(secondary_shares_offered)+
+                 venture_backed+s(num_bookrunners)+s(rank_no_leads)+
+                 s(num_lead_colead_managers)+s(c1)+s(c2)+s(c3)+s(c4)+
+                 s(word_length_sentiment)+s(negative)+s(positive)+
+                 s(uncertainty)+s(litigious)+s(strongmodal)+s(weakmodal)+
+                 s(constraining)+internet+s(nasdaq_returns)+s(vix_returns)+
+                 s(c4, uncertainty), data=new)
+summary(gam_mod_c4_3)
+plot(residuals(gam_mod_c4_3)~fitted(gam_mod_c4_3))
+plot(gam_mod_c4_3, scale=0)
+```
+

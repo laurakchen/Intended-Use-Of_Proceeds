@@ -57,5 +57,9 @@ for (i in 1:nrow(df)) {
 # add columns to original df
 df$nasdaq_returns = nasdaq.vec
 df$vix_returns = vix.vec
+
+# export df to xlsx file
+library(writexl)
+write_xlsx(df, "~/desktop/FinProject/IPO_Fee/controls.xlsx")
 ```
 
